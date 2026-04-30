@@ -26,6 +26,10 @@ streamlit run app.py
 - `reporting.py`：Markdown 报告输出
 - `models.py`：数据结构定义
 
+## 产品文档
+
+- `PRD.md`：正式产品需求文档，定义了产品定位、目标用户、核心功能与迭代规划
+
 ## 后续可扩展方向
 
 - 支持目录级批量导入

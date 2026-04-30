@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from textwrap import dedent
-from typing import Dict
+from typing import Dict, List, Tuple
 
 import streamlit as st
 
@@ -11,7 +11,7 @@ from reporting import build_report
 
 
 st.set_page_config(
-    page_title='AI Code Impact Cloud',
+    page_title='ImpactFlow｜AI 代码变更影响分析平台',
     page_icon='⚡',
     layout='wide',
     initial_sidebar_state='expanded',
@@ -45,6 +45,13 @@ SAMPLE_SOURCES = {
     ''').strip(),
 }
 
+PRD_SECTIONS = [
+    ('产品定位', '面向研发团队的代码变更影响分析平台，聚焦 PR 审查、发布前检查与回归风险控制。'),
+    ('目标用户', '开发工程师、Reviewer、测试工程师、技术负责人。'),
+    ('核心能力', '仓库接入、代码解析、diff 识别、影响传播、风险评估、建议生成、报告输出。'),
+    ('阶段规划', 'MVP 聚焦 Python 仓库分析；V1 增加 Git 与历史记录；V2 覆盖多语言与 AI 自动补丁。'),
+]
+
 SAMPLE_DIFFS = {
     'src/utils/math_ops.py': dedent('''
         @@ -1,6 +1,6 @@
@@ -65,6 +72,8 @@ APP_CSS = '''
         --muted: #94a3b8;
         --primary: #7c3aed;
         --primary-2: #22c55e;
+        --warning: #f59e0b;
+        --danger: #ef4444;
     }
     .stApp {
         background:
@@ -124,10 +133,35 @@ APP_CSS = '''
         margin-bottom: 0.4rem;
         font-size: 0.82rem;
     }
+    .badge {
+        display: inline-block;
+        padding: 0.24rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        margin-right: 0.4rem;
+        color: white;
+    }
+    .badge-low { background: rgba(34,197,94,0.22); border: 1px solid rgba(34,197,94,0.35); }
+    .badge-medium { background: rgba(245,158,11,0.22); border: 1px solid rgba(245,158,11,0.35); }
+    .badge-high { background: rgba(239,68,68,0.22); border: 1px solid rgba(239,68,68,0.35); }
+    .badge-roadmap { background: rgba(59,130,246,0.22); border: 1px solid rgba(59,130,246,0.35); }
 </style>
 '''
 
 st.markdown(APP_CSS, unsafe_allow_html=True)
+
+PRD_SECTIONS: List[Tuple[str, str]] = [
+    ('产品定位', '面向研发团队的代码变更影响分析平台，自动识别改动、评估传播范围并输出风险与建议。'),
+    ('目标用户', '开发工程师、Reviewer、测试工程师与技术负责人。'),
+    ('核心能力', '仓库接入、代码解析、变更识别、影响传播、风险评估、建议生成、报告输出。'),
+    ('里程碑', 'MVP 聚焦仓库导入与影响分析，V1 增加历史记录与 Git 集成，V2 增强多语言与 LLM 能力。'),
+]
+
+ROADMAP_ITEMS = [
+    ('MVP', '仓库导入、Python 解析、diff 识别、影响分析、建议生成、报告展示'),
+    ('V1', 'Git 仓库接入、历史记录、版本对比、风险规则配置、Markdown / PDF 导出'),
+    ('V2', '多语言支持、LLM 生成补丁、CI/CD 集成、团队协作、权限控制、风险预测'),
+]
 
 if 'repo_files' not in st.session_state:
     st.session_state.repo_files = SAMPLE_SOURCES.copy()
@@ -139,8 +173,8 @@ if 'last_payload' not in st.session_state:
     st.session_state.last_payload = None
 
 with st.sidebar:
-    st.markdown('## AI Code Impact Cloud')
-    st.caption('Repository intelligence for engineering teams')
+    st.markdown('## ImpactFlow')
+    st.caption('AI 代码变更影响分析平台')
     mode = st.radio('工作模式', ['仓库扫描', '手动编辑'], index=0)
     st.markdown('---')
     uploaded_zip = st.file_uploader('上传 ZIP 仓库', type=['zip'])
@@ -151,7 +185,7 @@ with st.sidebar:
     st.write('• 变更影响面识别')
     st.write('• 自动修复建议')
     st.write('• 测试补全建议')
-    st.write('• SaaS 风格报告输出')
+    st.write('• PR / 发布前风险摘要')
     analyze_button = st.button('开始分析', use_container_width=True)
 
 st.markdown(
@@ -160,12 +194,23 @@ st.markdown(
         <span class="tag">AI Repository Intelligence</span>
         <span class="tag">Impact Analysis</span>
         <span class="tag">Auto Repair Guidance</span>
-        <h1>面向中大型代码仓库的 AI 变更影响分析平台</h1>
-        <p>支持上传整个仓库、自动抽取依赖关系、评估变更风险并生成修复补丁与测试建议，适合作为工程团队的 PR 审查与回归防线。</p>
+        <h1>面向研发团队的 AI 变更影响分析平台</h1>
+        <p>支持上传整个仓库、自动抽取依赖关系、评估变更风险并生成修复补丁与测试建议，帮助团队在 PR 审查和发布前降低回归风险。</p>
     </div>
     ''',
     unsafe_allow_html=True,
 )
+
+
+def _risk_badge(level: str) -> str:
+    mapping = {
+        '低风险': 'badge-low',
+        '中风险': 'badge-medium',
+        '高风险': 'badge-high',
+        '严重风险': 'badge-high',
+    }
+    cls = mapping.get(level, 'badge-medium')
+    return f"<span class='badge {cls}'>{level}</span>"
 
 
 def render_metrics(payload: Dict):
@@ -184,6 +229,25 @@ def render_metrics(payload: Dict):
 
 def render_result(payload: Dict):
     render_metrics(payload)
+
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.subheader('产品定位与路线图')
+    top_cols = st.columns([0.55, 0.45], gap='large')
+    risk_level = payload['summary'].get('risk_level', '中风险')
+    risk_score = payload['summary'].get('risk_score', 0)
+    with top_cols[0]:
+        st.markdown(
+            f"{_risk_badge(risk_level)} <span class='badge badge-medium'>PR 审查</span> "
+            f"<span class='badge badge-roadmap'>发布前检查</span>",
+            unsafe_allow_html=True,
+        )
+        st.write(f'当前风险评分：{risk_score}/100，系统会根据变更函数与传播范围自动评估。')
+    with top_cols[1]:
+        for stage, desc in ROADMAP_ITEMS:
+            st.markdown(f"<div class='tag'>{stage}</div>", unsafe_allow_html=True)
+            st.write(desc)
+    st.markdown('</div>', unsafe_allow_html=True)
+
     left, right = st.columns([0.56, 0.44], gap='large')
     with left:
         st.markdown('<div class="panel">', unsafe_allow_html=True)
@@ -204,6 +268,13 @@ def render_result(payload: Dict):
         st.markdown('</div>', unsafe_allow_html=True)
 
     with right:
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.subheader('产品 PRD 概览')
+        for title, desc in PRD_SECTIONS:
+            st.markdown(f"<div class='tag'>{title}</div>", unsafe_allow_html=True)
+            st.write(desc)
+        st.markdown('</div>', unsafe_allow_html=True)
+
         st.markdown('<div class="panel">', unsafe_allow_html=True)
         st.subheader('仓库概览')
         if payload['repo_summary']:

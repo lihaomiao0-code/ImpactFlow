@@ -41,6 +41,26 @@ def _generate_patch_hints(changed_functions: List[Any], impacted: List[Any]) -> 
     return deduped[:8]
 
 
+def _calculate_risk_score(changed_count: int, impacted_count: int, edge_count: int, function_count: int) -> int:
+    score = 15
+    score += min(changed_count * 18, 36)
+    score += min(impacted_count * 8, 32)
+    score += min(edge_count // 2, 12)
+    if function_count > 0:
+        score += min((impacted_count * 100) // function_count, 15)
+    return max(0, min(score, 100))
+
+
+def _risk_level(score: int) -> str:
+    if score >= 75:
+        return '严重风险'
+    if score >= 50:
+        return '高风险'
+    if score >= 25:
+        return '中风险'
+    return '低风险'
+
+
 def build_analysis_payload(sources: Dict[str, str], diffs: Dict[str, str]) -> Dict[str, Any]:
     analysis = analyze_files(sources)
     changed = find_changed_functions_in_files(sources, diffs)
@@ -57,6 +77,9 @@ def build_analysis_payload(sources: Dict[str, str], diffs: Dict[str, str]) -> Di
     for source, target in analysis.graph.edges():
         graph_edges.append({'source': source, 'target': target})
 
+    risk_score = _calculate_risk_score(len(changed), len(impacted), len(graph_edges), len(analysis.functions))
+    risk_level = _risk_level(risk_score)
+
     return {
         'summary': {
             'files': len(sources),
@@ -64,6 +87,8 @@ def build_analysis_payload(sources: Dict[str, str], diffs: Dict[str, str]) -> Di
             'changed_functions': len(changed),
             'impacted_functions': len(impacted),
             'edges': len(graph_edges),
+            'risk_score': risk_score,
+            'risk_level': risk_level,
         },
         'repo_summary': repo_summary,
         'changed': [asdict(fn) for fn in changed],
