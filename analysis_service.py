@@ -1,0 +1,77 @@
+from dataclasses import asdict
+from typing import Any, Dict, List, Optional
+
+from analyzer import analyze_files, find_changed_functions_in_files, match_similarity, suggest_impacted_functions
+from repository_loader import RepositorySnapshot, summarize_repository
+
+
+DEFAULT_REPAIR_HINTS = [
+    '为变更函数补充单元测试和边界条件测试',
+    '检查所有上游调用方，确认参数/返回值契约未破坏',
+    '补充回归测试，覆盖影响链上所有关键路径',
+    '在 PR 审查中附带影响分析报告与修复建议',
+]
+
+
+def _infer_test_suggestions(changed_functions: List[Any], impacted: List[Any]) -> List[str]:
+    suggestions = []
+    for fn in changed_functions:
+        suggestions.append(f'创建 `{fn.module}` 对应的单元测试，覆盖 `{fn.name}` 的正常/异常/边界场景')
+    if impacted:
+        suggestions.append('补充集成测试，覆盖受影响调用链的端到端行为')
+    suggestions.extend(DEFAULT_REPAIR_HINTS)
+    deduped = []
+    for item in suggestions:
+        if item not in deduped:
+            deduped.append(item)
+    return deduped[:8]
+
+
+def _generate_patch_hints(changed_functions: List[Any], impacted: List[Any]) -> List[str]:
+    hints = []
+    for fn in changed_functions:
+        hints.append(f'优先在 `{fn.module}` 中保留兼容性封装，减少外部调用方改动')
+        hints.append(f'对 `{fn.qualified_name}` 增加输入校验和空值保护')
+    for item in impacted[:3]:
+        hints.append(f'同步审查 `{item[0]}` 的调用契约，避免链式回归')
+    deduped = []
+    for item in hints:
+        if item not in deduped:
+            deduped.append(item)
+    return deduped[:8]
+
+
+def build_analysis_payload(sources: Dict[str, str], diffs: Dict[str, str]) -> Dict[str, Any]:
+    analysis = analyze_files(sources)
+    changed = find_changed_functions_in_files(sources, diffs)
+    impacted = suggest_impacted_functions(analysis, changed)
+    impacted_names = [name for name, _ in impacted]
+    top_related = match_similarity(' '.join(fn.qualified_name for fn in changed), impacted_names)
+    repo_summary = summarize_repository(sources)
+
+    graph_nodes = []
+    for node, attrs in analysis.graph.nodes(data=True):
+        graph_nodes.append({'id': node, **attrs})
+
+    graph_edges = []
+    for source, target in analysis.graph.edges():
+        graph_edges.append({'source': source, 'target': target})
+
+    return {
+        'summary': {
+            'files': len(sources),
+            'functions': len(analysis.functions),
+            'changed_functions': len(changed),
+            'impacted_functions': len(impacted),
+            'edges': len(graph_edges),
+        },
+        'repo_summary': repo_summary,
+        'changed': [asdict(fn) for fn in changed],
+        'impacted': [{'name': name, 'reason': reason} for name, reason in impacted],
+        'related': [{'name': name, 'score': score} for name, score in top_related[:5]],
+        'patch_hints': _generate_patch_hints(changed, impacted),
+        'test_hints': _infer_test_suggestions(changed, impacted),
+        'graph': {'nodes': graph_nodes, 'edges': graph_edges},
+        'sources': sources,
+        'diffs': diffs,
+    }
