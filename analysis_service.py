@@ -13,6 +13,27 @@ DEFAULT_REPAIR_HINTS = [
 ]
 
 
+def _compute_risk_score(changed_count: int, impacted_count: int, settings: Dict[str, Any]) -> int:
+    base = changed_count * 18 + impacted_count * 12
+    if changed_count >= settings.get('high_change_threshold', 2):
+        base += 10
+    if impacted_count >= settings.get('high_impacted_threshold', 3):
+        base += 15
+    if settings.get('severity_boost', True):
+        base += 8 if impacted_count else 0
+    return min(100, base)
+
+
+def _risk_level_from_score(score: int) -> str:
+    if score < 25:
+        return '低风险'
+    if score < 55:
+        return '中风险'
+    if score < 80:
+        return '高风险'
+    return '严重风险'
+
+
 def _infer_test_suggestions(changed_functions: List[Any], impacted: List[Any]) -> List[str]:
     suggestions = []
     for fn in changed_functions:
@@ -61,13 +82,18 @@ def _risk_level(score: int) -> str:
     return '低风险'
 
 
-def build_analysis_payload(sources: Dict[str, str], diffs: Dict[str, str]) -> Dict[str, Any]:
+def build_analysis_payload(
+    sources: Dict[str, str],
+    diffs: Dict[str, str],
+    risk_settings: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     analysis = analyze_files(sources)
     changed = find_changed_functions_in_files(sources, diffs)
     impacted = suggest_impacted_functions(analysis, changed)
     impacted_names = [name for name, _ in impacted]
     top_related = match_similarity(' '.join(fn.qualified_name for fn in changed), impacted_names)
     repo_summary = summarize_repository(sources)
+    settings = risk_settings or {}
 
     graph_nodes = []
     for node, attrs in analysis.graph.nodes(data=True):
@@ -77,8 +103,9 @@ def build_analysis_payload(sources: Dict[str, str], diffs: Dict[str, str]) -> Di
     for source, target in analysis.graph.edges():
         graph_edges.append({'source': source, 'target': target})
 
-    risk_score = _calculate_risk_score(len(changed), len(impacted), len(graph_edges), len(analysis.functions))
-    risk_level = _risk_level(risk_score)
+    risk_score = _compute_risk_score(len(changed), len(impacted), settings)
+    risk_level = _risk_level_from_score(risk_score)
+    severity_score = 8 if impacted and settings.get('severity_boost', True) else 0
 
     return {
         'summary': {
@@ -89,6 +116,11 @@ def build_analysis_payload(sources: Dict[str, str], diffs: Dict[str, str]) -> Di
             'edges': len(graph_edges),
             'risk_score': risk_score,
             'risk_level': risk_level,
+            'risk_profile': {
+                'change_score': len(changed) * 18,
+                'impact_score': len(impacted) * 12,
+                'severity_score': severity_score,
+            },
         },
         'repo_summary': repo_summary,
         'changed': [asdict(fn) for fn in changed],

@@ -256,6 +256,7 @@ def render_result(payload: Dict):
     top_cols = st.columns([0.55, 0.45], gap='large')
     risk_level = payload['summary'].get('risk_level', '中风险')
     risk_score = payload['summary'].get('risk_score', 0)
+    risk_profile = payload['summary'].get('risk_profile', {})
     with top_cols[0]:
         st.markdown(
             f"{_risk_badge(risk_level)} <span class='badge badge-medium'>PR 审查</span> "
@@ -263,6 +264,7 @@ def render_result(payload: Dict):
             unsafe_allow_html=True,
         )
         st.write(f'当前风险评分：{risk_score}/100，系统会根据变更函数与传播范围自动评估。')
+        st.write(f"风险构成：变更 {risk_profile.get('change_score', 0)} / 传播 {risk_profile.get('impact_score', 0)} / 加权 {risk_profile.get('severity_score', 0)}")
     with top_cols[1]:
         for stage, desc in ROADMAP_ITEMS:
             st.markdown(f"<div class='tag'>{stage}</div>", unsafe_allow_html=True)
@@ -377,12 +379,52 @@ if analyze_button or mode == '手动编辑':
     st.markdown('</div>', unsafe_allow_html=True)
     st.session_state.repo_diffs = {'src/utils/math_ops.py': diff_math}
 
-    payload = build_analysis_payload(st.session_state.repo_files, st.session_state.repo_diffs)
+    payload = build_analysis_payload(st.session_state.repo_files, st.session_state.repo_diffs, st.session_state.risk_settings)
+    payload['risk_settings'] = st.session_state.risk_settings.copy()
     st.session_state.last_payload = payload
+    st.session_state.analysis_history.append({
+        'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'repo': st.session_state.repo_name,
+        'risk_level': payload['summary'].get('risk_level', '中风险'),
+        'risk_score': payload['summary'].get('risk_score', 0),
+        'changed': payload['summary'].get('changed_functions', 0),
+        'impacted': payload['summary'].get('impacted_functions', 0),
+    })
+    st.session_state.analysis_history = st.session_state.analysis_history[-20:]
     render_result(payload)
 else:
-    payload = build_analysis_payload(st.session_state.repo_files, st.session_state.repo_diffs)
+    payload = build_analysis_payload(st.session_state.repo_files, st.session_state.repo_diffs, st.session_state.risk_settings)
+    payload['risk_settings'] = st.session_state.risk_settings.copy()
     render_result(payload)
+
+history_tab, settings_tab, export_tab = st.tabs(['历史分析记录', '风险规则说明', '报告导出'])
+
+with history_tab:
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.subheader('历史分析记录')
+    if st.session_state.analysis_history:
+        for item in reversed(st.session_state.analysis_history[-10:]):
+            st.write(f"• {item['time']} | `{item['repo']}` | {item['risk_level']} | 风险分 {item['risk_score']} | 变更 {item['changed']} | 影响 {item['impacted']}")
+    else:
+        st.info('暂无历史记录，执行一次分析后将自动保留最近记录。')
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with settings_tab:
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.subheader('风险规则说明')
+    st.write('• 变更函数越多，基础风险越高')
+    st.write('• 受影响函数越多，传播风险越高')
+    st.write('• 开启核心路径加权后，关键链路修改会额外提升风险')
+    st.write('• 你可以通过侧边栏调整高风险阈值')
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with export_tab:
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.subheader('报告导出')
+    report_text = build_report(st.session_state.repo_files, st.session_state.repo_diffs)
+    st.download_button('下载 Markdown 报告', data=report_text, file_name='impactflow-report.md', mime='text/markdown', use_container_width=True)
+    st.caption('当前版本导出为 Markdown，后续可扩展 HTML / PDF。')
+    st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="panel">', unsafe_allow_html=True)
 st.subheader('核心逻辑')
@@ -390,11 +432,13 @@ logic_col1, logic_col2, logic_col3 = st.columns(3)
 with logic_col1:
     st.write('1. 扫描 ZIP 或本地仓库，抽取可解析源文件')
     st.write('2. 基于 AST 构建函数级依赖图')
+    st.write('3. 识别仓库文件分布与语言结构')
 with logic_col2:
-    st.write('3. 基于 diff 定位变更函数与影响范围')
-    st.write('4. 生成自动修复与测试建议')
+    st.write('4. 基于 diff 定位变更函数与影响范围')
+    st.write('5. 生成自动修复与测试建议')
+    st.write('6. 将变更结果记录到历史分析中')
 with logic_col3:
-    st.write('5. 计算风险分数并输出风险等级')
-    st.write('6. 为 PR/CI 提供可视化审查和风险摘要')
-    st.write('7. 为后续 LLM 代码补丁闭环预留接口')
+    st.write('7. 计算风险分数并输出风险等级')
+    st.write('8. 为 PR/CI 提供可视化审查和风险摘要')
+    st.write('9. 为后续 LLM 代码补丁闭环预留接口')
 st.markdown('</div>', unsafe_allow_html=True)
