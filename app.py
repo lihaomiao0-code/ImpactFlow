@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from textwrap import dedent
 from typing import Dict, List, Tuple
 
@@ -163,6 +164,12 @@ ROADMAP_ITEMS = [
     ('V2', '多语言支持、LLM 生成补丁、CI/CD 集成、团队协作、权限控制、风险预测'),
 ]
 
+DEFAULT_RISK_SETTINGS = {
+    'high_impacted_threshold': 3,
+    'high_change_threshold': 2,
+    'severity_boost': True,
+}
+
 if 'repo_files' not in st.session_state:
     st.session_state.repo_files = SAMPLE_SOURCES.copy()
 if 'repo_diffs' not in st.session_state:
@@ -171,6 +178,10 @@ if 'repo_name' not in st.session_state:
     st.session_state.repo_name = 'sample-repo'
 if 'last_payload' not in st.session_state:
     st.session_state.last_payload = None
+if 'analysis_history' not in st.session_state:
+    st.session_state.analysis_history = []
+if 'risk_settings' not in st.session_state:
+    st.session_state.risk_settings = DEFAULT_RISK_SETTINGS.copy()
 
 with st.sidebar:
     st.markdown('## ImpactFlow')
@@ -179,6 +190,16 @@ with st.sidebar:
     st.markdown('---')
     uploaded_zip = st.file_uploader('上传 ZIP 仓库', type=['zip'])
     uploaded_folder = st.text_input('或填写本地仓库路径', placeholder='/path/to/repository')
+    st.markdown('---')
+    st.markdown('### 风险规则')
+    high_impacted_threshold = st.slider('高风险影响函数阈值', 1, 10, st.session_state.risk_settings['high_impacted_threshold'])
+    high_change_threshold = st.slider('高风险变更函数阈值', 1, 10, st.session_state.risk_settings['high_change_threshold'])
+    severity_boost = st.checkbox('核心路径风险加权', value=st.session_state.risk_settings['severity_boost'])
+    st.session_state.risk_settings = {
+        'high_impacted_threshold': high_impacted_threshold,
+        'high_change_threshold': high_change_threshold,
+        'severity_boost': severity_boost,
+    }
     st.markdown('---')
     st.markdown('### 产品能力')
     st.write('• 仓库扫描与静态分析')
@@ -373,6 +394,7 @@ with logic_col2:
     st.write('3. 基于 diff 定位变更函数与影响范围')
     st.write('4. 生成自动修复与测试建议')
 with logic_col3:
-    st.write('5. 为 PR/CI 提供可视化审查和风险摘要')
-    st.write('6. 为后续 LLM 代码补丁闭环预留接口')
+    st.write('5. 计算风险分数并输出风险等级')
+    st.write('6. 为 PR/CI 提供可视化审查和风险摘要')
+    st.write('7. 为后续 LLM 代码补丁闭环预留接口')
 st.markdown('</div>', unsafe_allow_html=True)
